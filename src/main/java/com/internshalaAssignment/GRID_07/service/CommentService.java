@@ -6,6 +6,7 @@ import com.internshalaAssignment.GRID_07.domain.entity.Comment;
 import com.internshalaAssignment.GRID_07.domain.entity.Post;
 import com.internshalaAssignment.GRID_07.domain.enums.AuthorType;
 import com.internshalaAssignment.GRID_07.domain.enums.InteractionType;
+import com.internshalaAssignment.GRID_07.domain.event.BotInteractionEventPublisher;
 import com.internshalaAssignment.GRID_07.exception.BusinessRuleViolationException;
 import com.internshalaAssignment.GRID_07.exception.ResourceNotFoundException;
 import com.internshalaAssignment.GRID_07.redis.service.BotGuardrailService;
@@ -28,6 +29,7 @@ public class CommentService {
 	private final BotRepository botRepository;
 	private final ViralityScoreService viralityScoreService;
 	private final BotGuardrailService botGuardrailService;
+	private final BotInteractionEventPublisher botInteractionEventPublisher;
 
 	public CommentService(
 		CommentRepository commentRepository,
@@ -35,7 +37,8 @@ public class CommentService {
 		UserRepository userRepository,
 		BotRepository botRepository,
 		ViralityScoreService viralityScoreService,
-		BotGuardrailService botGuardrailService
+		BotGuardrailService botGuardrailService,
+		BotInteractionEventPublisher botInteractionEventPublisher
 	) {
 		this.commentRepository = commentRepository;
 		this.postRepository = postRepository;
@@ -43,6 +46,7 @@ public class CommentService {
 		this.botRepository = botRepository;
 		this.viralityScoreService = viralityScoreService;
 		this.botGuardrailService = botGuardrailService;
+		this.botInteractionEventPublisher = botInteractionEventPublisher;
 	}
 
 	public CommentResponse createComment(Long postId, CreateCommentRequest request) {
@@ -52,9 +56,10 @@ public class CommentService {
 		validateAuthorExists(request.authorType(), request.authorId());
 		Comment parentComment = fetchParentComment(postId, request.parentCommentId());
 		int depthLevel = resolveDepthLevel(parentComment);
+		Long targetHumanId = resolveTargetHumanId(post, parentComment);
 
 		if (request.authorType() == AuthorType.BOT) {
-			applyBotGuardrails(post, parentComment, request.authorId(), postId);
+			applyBotGuardrails(request.authorId(), postId, targetHumanId);
 		}
 
 		Comment comment = new Comment();
@@ -71,12 +76,16 @@ public class CommentService {
 			? InteractionType.BOT_REPLY
 			: InteractionType.HUMAN_COMMENT;
 		viralityScoreService.incrementScore(postId, interactionType);
+
+		if (request.authorType() == AuthorType.BOT && targetHumanId != null) {
+			botInteractionEventPublisher.publish(postId, request.authorId(), targetHumanId);
+		}
+
 		return toCommentResponse(savedComment);
 	}
 
-	private void applyBotGuardrails(Post post, Comment parentComment, Long botId, Long postId) {
+	private void applyBotGuardrails(Long botId, Long postId, Long targetHumanId) {
 		botGuardrailService.claimBotReplySlot(postId);
-		Long targetHumanId = resolveTargetHumanId(post, parentComment);
 		if (targetHumanId != null) {
 			botGuardrailService.claimBotHumanCooldown(botId, targetHumanId);
 		}
