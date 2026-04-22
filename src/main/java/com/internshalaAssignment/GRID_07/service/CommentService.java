@@ -4,8 +4,10 @@ import com.internshalaAssignment.GRID_07.api.dto.request.CreateCommentRequest;
 import com.internshalaAssignment.GRID_07.api.dto.response.CommentResponse;
 import com.internshalaAssignment.GRID_07.domain.entity.Comment;
 import com.internshalaAssignment.GRID_07.domain.enums.AuthorType;
+import com.internshalaAssignment.GRID_07.domain.enums.InteractionType;
 import com.internshalaAssignment.GRID_07.exception.BusinessRuleViolationException;
 import com.internshalaAssignment.GRID_07.exception.ResourceNotFoundException;
+import com.internshalaAssignment.GRID_07.redis.service.ViralityScoreService;
 import com.internshalaAssignment.GRID_07.repository.BotRepository;
 import com.internshalaAssignment.GRID_07.repository.CommentRepository;
 import com.internshalaAssignment.GRID_07.repository.PostRepository;
@@ -22,17 +24,20 @@ public class CommentService {
 	private final PostRepository postRepository;
 	private final UserRepository userRepository;
 	private final BotRepository botRepository;
+	private final ViralityScoreService viralityScoreService;
 
 	public CommentService(
 		CommentRepository commentRepository,
 		PostRepository postRepository,
 		UserRepository userRepository,
-		BotRepository botRepository
+		BotRepository botRepository,
+		ViralityScoreService viralityScoreService
 	) {
 		this.commentRepository = commentRepository;
 		this.postRepository = postRepository;
 		this.userRepository = userRepository;
 		this.botRepository = botRepository;
+		this.viralityScoreService = viralityScoreService;
 	}
 
 	public CommentResponse createComment(Long postId, CreateCommentRequest request) {
@@ -53,6 +58,10 @@ public class CommentService {
 		comment.setCreatedAt(Instant.now());
 
 		Comment savedComment = commentRepository.save(comment);
+		InteractionType interactionType = request.authorType() == AuthorType.BOT
+			? InteractionType.BOT_REPLY
+			: InteractionType.HUMAN_COMMENT;
+		viralityScoreService.incrementScore(postId, interactionType);
 		return toCommentResponse(savedComment);
 	}
 
