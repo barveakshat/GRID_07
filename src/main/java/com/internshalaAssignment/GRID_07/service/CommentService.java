@@ -3,10 +3,12 @@ package com.internshalaAssignment.GRID_07.service;
 import com.internshalaAssignment.GRID_07.api.dto.request.CreateCommentRequest;
 import com.internshalaAssignment.GRID_07.api.dto.response.CommentResponse;
 import com.internshalaAssignment.GRID_07.domain.entity.Comment;
+import com.internshalaAssignment.GRID_07.domain.entity.Post;
 import com.internshalaAssignment.GRID_07.domain.enums.AuthorType;
 import com.internshalaAssignment.GRID_07.domain.enums.InteractionType;
 import com.internshalaAssignment.GRID_07.exception.BusinessRuleViolationException;
 import com.internshalaAssignment.GRID_07.exception.ResourceNotFoundException;
+import com.internshalaAssignment.GRID_07.redis.service.BotGuardrailService;
 import com.internshalaAssignment.GRID_07.redis.service.ViralityScoreService;
 import com.internshalaAssignment.GRID_07.repository.BotRepository;
 import com.internshalaAssignment.GRID_07.repository.CommentRepository;
@@ -25,28 +27,35 @@ public class CommentService {
 	private final UserRepository userRepository;
 	private final BotRepository botRepository;
 	private final ViralityScoreService viralityScoreService;
+	private final BotGuardrailService botGuardrailService;
 
 	public CommentService(
 		CommentRepository commentRepository,
 		PostRepository postRepository,
 		UserRepository userRepository,
 		BotRepository botRepository,
-		ViralityScoreService viralityScoreService
+		ViralityScoreService viralityScoreService,
+		BotGuardrailService botGuardrailService
 	) {
 		this.commentRepository = commentRepository;
 		this.postRepository = postRepository;
 		this.userRepository = userRepository;
 		this.botRepository = botRepository;
 		this.viralityScoreService = viralityScoreService;
+		this.botGuardrailService = botGuardrailService;
 	}
 
 	public CommentResponse createComment(Long postId, CreateCommentRequest request) {
-		if (!postRepository.existsById(postId)) {
-			throw new ResourceNotFoundException("Post not found for id: " + postId);
-		}
+		Post post = postRepository.findById(postId)
+			.orElseThrow(() -> new ResourceNotFoundException("Post not found for id: " + postId));
 
 		validateAuthorExists(request.authorType(), request.authorId());
-		int depthLevel = resolveDepthLevel(postId, request.parentCommentId());
+		Comment parentComment = fetchParentComment(postId, request.parentCommentId());
+		int depthLevel = resolveDepthLevel(parentComment);
+
+		if (request.authorType() == AuthorType.BOT) {
+			applyBotGuardrails(post, parentComment, request.authorId(), postId);
+		}
 
 		Comment comment = new Comment();
 		comment.setPostId(postId);
@@ -65,6 +74,24 @@ public class CommentService {
 		return toCommentResponse(savedComment);
 	}
 
+	private void applyBotGuardrails(Post post, Comment parentComment, Long botId, Long postId) {
+		botGuardrailService.claimBotReplySlot(postId);
+		Long targetHumanId = resolveTargetHumanId(post, parentComment);
+		if (targetHumanId != null) {
+			botGuardrailService.claimBotHumanCooldown(botId, targetHumanId);
+		}
+	}
+
+	private Long resolveTargetHumanId(Post post, Comment parentComment) {
+		if (parentComment != null && parentComment.getAuthorType() == AuthorType.USER) {
+			return parentComment.getAuthorId();
+		}
+		if (post.getAuthorType() == AuthorType.USER) {
+			return post.getAuthorId();
+		}
+		return null;
+	}
+
 	private void validateAuthorExists(AuthorType authorType, Long authorId) {
 		boolean exists = authorType == AuthorType.USER
 			? userRepository.existsById(authorId)
@@ -75,13 +102,18 @@ public class CommentService {
 		}
 	}
 
-	private int resolveDepthLevel(Long postId, Long parentCommentId) {
+	private Comment fetchParentComment(Long postId, Long parentCommentId) {
 		if (parentCommentId == null) {
+			return null;
+		}
+		return commentRepository.findByIdAndPostId(parentCommentId, postId)
+			.orElseThrow(() -> new ResourceNotFoundException("Parent comment not found for id: " + parentCommentId));
+	}
+
+	private int resolveDepthLevel(Comment parentComment) {
+		if (parentComment == null) {
 			return 1;
 		}
-
-		Comment parentComment = commentRepository.findByIdAndPostId(parentCommentId, postId)
-			.orElseThrow(() -> new ResourceNotFoundException("Parent comment not found for id: " + parentCommentId));
 
 		int depthLevel = parentComment.getDepthLevel() + 1;
 		if (depthLevel > MAX_DEPTH) {
