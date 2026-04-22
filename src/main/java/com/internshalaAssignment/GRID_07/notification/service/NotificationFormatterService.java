@@ -12,4 +12,12 @@ public class NotificationFormatterService {
 	public String buildImmediateLogMessage(Long userId, String message) {
 		return "Push Notification Sent to User " + userId + ": " + message;
 	}
+
+	public String buildSummaryLogMessage(String firstMessage, int totalMessages) {
+		if (totalMessages <= 1) {
+			return "Summarized Push Notification: " + firstMessage;
+		}
+		return "Summarized Push Notification: " + firstMessage + " and " + (totalMessages - 1)
+			+ " others interacted with your posts.";
+	}
 }
