@@ -2,8 +2,8 @@ package com.internshalaAssignment.GRID_07.domain.event;
 
 import com.internshalaAssignment.GRID_07.notification.service.NotificationDispatchService;
 import com.internshalaAssignment.GRID_07.repository.BotRepository;
-import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.event.TransactionalEventListener;
 
 @Component
 public class BotInteractionEventListener {
@@ -19,7 +19,7 @@ public class BotInteractionEventListener {
 		this.notificationDispatchService = notificationDispatchService;
 	}
 
-	@EventListener
+	@TransactionalEventListener
 	public void onBotInteraction(BotInteractionEvent event) {
 		botRepository.findById(event.botId()).ifPresent(bot ->
 			notificationDispatchService.handleBotInteraction(event.targetUserId(), bot.getName(), event.postId())
