@@ -24,6 +24,7 @@ public class BotGuardrailService {
 		String key = redisKeyBuilder.postBotCountKey(postId);
 		Long botCount = stringRedisTemplate.opsForValue().increment(key);
 		if (botCount != null && botCount > MAX_BOT_REPLIES_PER_POST) {
+			stringRedisTemplate.opsForValue().decrement(key);
 			throw new TooManyRequestsException("Bot reply cap reached for post " + postId);
 		}
 	}
@@ -34,5 +35,18 @@ public class BotGuardrailService {
 		if (!Boolean.TRUE.equals(cooldownClaimed)) {
 			throw new TooManyRequestsException("Bot-human cooldown active for bot " + botId + " and human " + humanId);
 		}
+	}
+
+	public void releaseBotReplySlot(Long postId) {
+		String key = redisKeyBuilder.postBotCountKey(postId);
+		Long count = stringRedisTemplate.opsForValue().decrement(key);
+		if (count != null && count < 0) {
+			stringRedisTemplate.opsForValue().set(key, "0");
+		}
+	}
+
+	public void releaseBotHumanCooldown(Long botId, Long humanId) {
+		String key = redisKeyBuilder.botHumanCooldownKey(botId, humanId);
+		stringRedisTemplate.delete(key);
 	}
 }

@@ -6,10 +6,8 @@ import com.internshalaAssignment.GRID_07.domain.entity.Comment;
 import com.internshalaAssignment.GRID_07.domain.entity.Post;
 import com.internshalaAssignment.GRID_07.domain.enums.AuthorType;
 import com.internshalaAssignment.GRID_07.domain.enums.InteractionType;
-import com.internshalaAssignment.GRID_07.domain.event.BotInteractionEventPublisher;
 import com.internshalaAssignment.GRID_07.exception.BusinessRuleViolationException;
 import com.internshalaAssignment.GRID_07.exception.ResourceNotFoundException;
-import com.internshalaAssignment.GRID_07.redis.service.BotGuardrailService;
 import com.internshalaAssignment.GRID_07.redis.service.ViralityScoreService;
 import com.internshalaAssignment.GRID_07.repository.BotRepository;
 import com.internshalaAssignment.GRID_07.repository.CommentRepository;
@@ -28,8 +26,7 @@ public class CommentService {
 	private final UserRepository userRepository;
 	private final BotRepository botRepository;
 	private final ViralityScoreService viralityScoreService;
-	private final BotGuardrailService botGuardrailService;
-	private final BotInteractionEventPublisher botInteractionEventPublisher;
+	private final GuardedBotCommentTransactionService guardedBotCommentTransactionService;
 
 	public CommentService(
 		CommentRepository commentRepository,
@@ -37,30 +34,27 @@ public class CommentService {
 		UserRepository userRepository,
 		BotRepository botRepository,
 		ViralityScoreService viralityScoreService,
-		BotGuardrailService botGuardrailService,
-		BotInteractionEventPublisher botInteractionEventPublisher
+		GuardedBotCommentTransactionService guardedBotCommentTransactionService
 	) {
 		this.commentRepository = commentRepository;
 		this.postRepository = postRepository;
 		this.userRepository = userRepository;
 		this.botRepository = botRepository;
 		this.viralityScoreService = viralityScoreService;
-		this.botGuardrailService = botGuardrailService;
-		this.botInteractionEventPublisher = botInteractionEventPublisher;
+		this.guardedBotCommentTransactionService = guardedBotCommentTransactionService;
 	}
 
 	public CommentResponse createComment(Long postId, CreateCommentRequest request) {
+		if (request.authorType() == AuthorType.BOT) {
+			return guardedBotCommentTransactionService.createGuardedBotComment(postId, request);
+		}
+
 		Post post = postRepository.findById(postId)
 			.orElseThrow(() -> new ResourceNotFoundException("Post not found for id: " + postId));
 
 		validateAuthorExists(request.authorType(), request.authorId());
 		Comment parentComment = fetchParentComment(postId, request.parentCommentId());
 		int depthLevel = resolveDepthLevel(parentComment);
-		Long targetHumanId = resolveTargetHumanId(post, parentComment);
-
-		if (request.authorType() == AuthorType.BOT) {
-			applyBotGuardrails(request.authorId(), postId, targetHumanId);
-		}
 
 		Comment comment = new Comment();
 		comment.setPostId(postId);
@@ -72,33 +66,8 @@ public class CommentService {
 		comment.setCreatedAt(Instant.now());
 
 		Comment savedComment = commentRepository.save(comment);
-		InteractionType interactionType = request.authorType() == AuthorType.BOT
-			? InteractionType.BOT_REPLY
-			: InteractionType.HUMAN_COMMENT;
-		viralityScoreService.incrementScore(postId, interactionType);
-
-		if (request.authorType() == AuthorType.BOT && targetHumanId != null) {
-			botInteractionEventPublisher.publish(postId, request.authorId(), targetHumanId);
-		}
-
+		viralityScoreService.incrementScore(postId, InteractionType.HUMAN_COMMENT);
 		return toCommentResponse(savedComment);
-	}
-
-	private void applyBotGuardrails(Long botId, Long postId, Long targetHumanId) {
-		botGuardrailService.claimBotReplySlot(postId);
-		if (targetHumanId != null) {
-			botGuardrailService.claimBotHumanCooldown(botId, targetHumanId);
-		}
-	}
-
-	private Long resolveTargetHumanId(Post post, Comment parentComment) {
-		if (parentComment != null && parentComment.getAuthorType() == AuthorType.USER) {
-			return parentComment.getAuthorId();
-		}
-		if (post.getAuthorType() == AuthorType.USER) {
-			return post.getAuthorId();
-		}
-		return null;
 	}
 
 	private void validateAuthorExists(AuthorType authorType, Long authorId) {
