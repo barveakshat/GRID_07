@@ -16,6 +16,8 @@ import com.internshalaAssignment.GRID_07.repository.CommentRepository;
 import com.internshalaAssignment.GRID_07.repository.PostRepository;
 import java.time.Instant;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
@@ -46,7 +48,11 @@ public class GuardedBotCommentTransactionService {
 		this.botInteractionEventPublisher = botInteractionEventPublisher;
 	}
 
-	@Transactional
+	@Transactional(
+		isolation = Isolation.READ_COMMITTED,
+		propagation = Propagation.REQUIRED,
+		timeout = 5
+	)
 	public CommentResponse createGuardedBotComment(Long postId, CreateCommentRequest request) {
 		Post post = postRepository.findById(postId)
 			.orElseThrow(() -> new ResourceNotFoundException("Post not found for id: " + postId));
