@@ -3,7 +3,10 @@ package com.internshalaAssignment.GRID_07.redis.service;
 import com.internshalaAssignment.GRID_07.exception.TooManyRequestsException;
 import com.internshalaAssignment.GRID_07.redis.key.RedisKeyBuilder;
 import java.time.Duration;
+import java.util.List;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.RedisScript;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -14,17 +17,26 @@ public class BotGuardrailService {
 
 	private final StringRedisTemplate stringRedisTemplate;
 	private final RedisKeyBuilder redisKeyBuilder;
+	private final RedisScript<Long> claimBotReplySlotScript;
 
-	public BotGuardrailService(StringRedisTemplate stringRedisTemplate, RedisKeyBuilder redisKeyBuilder) {
+	public BotGuardrailService(
+		StringRedisTemplate stringRedisTemplate,
+		RedisKeyBuilder redisKeyBuilder,
+		@Qualifier("claimBotReplySlotScript") RedisScript<Long> claimBotReplySlotScript
+	) {
 		this.stringRedisTemplate = stringRedisTemplate;
 		this.redisKeyBuilder = redisKeyBuilder;
+		this.claimBotReplySlotScript = claimBotReplySlotScript;
 	}
 
 	public void claimBotReplySlot(Long postId) {
 		String key = redisKeyBuilder.postBotCountKey(postId);
-		Long botCount = stringRedisTemplate.opsForValue().increment(key);
-		if (botCount != null && botCount > MAX_BOT_REPLIES_PER_POST) {
-			stringRedisTemplate.opsForValue().decrement(key);
+		Long claimed = stringRedisTemplate.execute(
+			claimBotReplySlotScript,
+			List.of(key),
+			String.valueOf(MAX_BOT_REPLIES_PER_POST)
+		);
+		if (!Long.valueOf(1L).equals(claimed)) {
 			throw new TooManyRequestsException("Bot reply cap reached for post " + postId);
 		}
 	}

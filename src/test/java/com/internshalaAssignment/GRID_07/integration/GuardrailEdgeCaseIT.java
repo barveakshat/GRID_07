@@ -113,6 +113,31 @@ class GuardrailEdgeCaseIT {
 		assertEquals(2, commentRepository.countByPostId(post.getId()));
 	}
 
+	@Test
+	void botCounterDoesNotDriftWhenCapDenialsRepeat() {
+		User user = saveUser("cap-user");
+		Post post = savePost(user);
+
+		for (int i = 1; i <= 100; i++) {
+			Bot bot = saveBot("cap-ok-bot-" + i);
+			commentService.createComment(post.getId(),
+				new CreateCommentRequest(AuthorType.BOT, bot.getId(), null, "reply " + i));
+		}
+
+		Bot deniedBot = saveBot("cap-denied-bot");
+		for (int i = 0; i < 10; i++) {
+			int attempt = i;
+			assertThrows(TooManyRequestsException.class, () ->
+				commentService.createComment(post.getId(),
+					new CreateCommentRequest(AuthorType.BOT, deniedBot.getId(), null, "blocked " + attempt))
+			);
+		}
+
+		assertEquals(100, commentRepository.countByPostId(post.getId()));
+		String botCountKey = redisKeyBuilder.postBotCountKey(post.getId());
+		assertEquals("100", stringRedisTemplate.opsForValue().get(botCountKey));
+	}
+
 	// --- Vertical depth cap ---
 
 	@Test
