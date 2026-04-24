@@ -16,6 +16,7 @@ import com.internshalaAssignment.GRID_07.domain.entity.User;
 import com.internshalaAssignment.GRID_07.domain.enums.AuthorType;
 import com.internshalaAssignment.GRID_07.exception.BusinessRuleViolationException;
 import com.internshalaAssignment.GRID_07.exception.TooManyRequestsException;
+import com.internshalaAssignment.GRID_07.notification.scheduler.NotificationSweeperScheduler;
 import com.internshalaAssignment.GRID_07.notification.service.NotificationDispatchService;
 import com.internshalaAssignment.GRID_07.notification.service.PendingNotificationIndexService;
 import com.internshalaAssignment.GRID_07.notification.service.PendingNotificationQueueService;
@@ -52,6 +53,7 @@ class GuardrailEdgeCaseIT {
 	@Autowired private NotificationDispatchService notificationDispatchService;
 	@Autowired private PendingNotificationQueueService pendingNotificationQueueService;
 	@Autowired private PendingNotificationIndexService pendingNotificationIndexService;
+	@Autowired private NotificationSweeperScheduler notificationSweeperScheduler;
 
 	@Autowired private UserRepository userRepository;
 	@Autowired private BotRepository botRepository;
@@ -199,6 +201,32 @@ class GuardrailEdgeCaseIT {
 		notificationDispatchService.handleBotInteraction(user.getId(), "Bot Y", 1L);
 		Set<Long> afterQueue = pendingNotificationIndexService.getAllUsers();
 		assertTrue(afterQueue.contains(user.getId()));
+	}
+
+	@Test
+	void sweeperDrainsQueuedNotificationsAndRemovesUserFromIndex() {
+		User user = saveUser("sweep-user");
+
+		notificationDispatchService.handleBotInteraction(user.getId(), "Bot A", 1L);
+		notificationDispatchService.handleBotInteraction(user.getId(), "Bot B", 1L);
+		notificationDispatchService.handleBotInteraction(user.getId(), "Bot C", 1L);
+
+		assertTrue(pendingNotificationIndexService.getAllUsers().contains(user.getId()));
+
+		notificationSweeperScheduler.sweepPendingNotifications();
+
+		assertFalse(pendingNotificationIndexService.getAllUsers().contains(user.getId()));
+		assertTrue(pendingNotificationQueueService.drainAll(user.getId()).isEmpty());
+	}
+
+	@Test
+	void sweeperRemovesStaleIndexedUserWithEmptyQueue() {
+		User user = saveUser("stale-index-user");
+		pendingNotificationIndexService.addUser(user.getId());
+
+		notificationSweeperScheduler.sweepPendingNotifications();
+
+		assertFalse(pendingNotificationIndexService.getAllUsers().contains(user.getId()));
 	}
 
 	// --- Statelessness ---
