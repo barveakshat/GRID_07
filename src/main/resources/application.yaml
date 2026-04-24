@@ -2,21 +2,21 @@ spring:
   application:
     name: GRID_07
   datasource:
-    url: jdbc:postgresql://localhost:5432/grid07db
-    username: akshat
-    password: secret
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/grid07db}
+    username: ${SPRING_DATASOURCE_USERNAME:akshat}
+    password: ${SPRING_DATASOURCE_PASSWORD:secret}
   jpa:
     hibernate:
-      ddl-auto: update
-    show-sql: true
+      ddl-auto: ${SPRING_JPA_HIBERNATE_DDL_AUTO:update}
+    show-sql: ${SPRING_JPA_SHOW_SQL:true}
     properties:
       hibernate:
-        format_sql: true
+        format_sql: ${SPRING_JPA_PROPERTIES_HIBERNATE_FORMAT_SQL:true}
   data:
     redis:
-      host: localhost
-      port: 6379
+      host: ${SPRING_DATA_REDIS_HOST:localhost}
+      port: ${SPRING_DATA_REDIS_PORT:6379}
 
 app:
   notification:
-    sweep-cron: "0 */5 * * * *"
+    sweep-cron: ${APP_NOTIFICATION_SWEEP_CRON:0 */5 * * * *}
